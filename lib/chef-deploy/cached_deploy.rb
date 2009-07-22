@@ -22,7 +22,7 @@ class CachedDeploy
     end
     
     Chef::Log.info "ensuring proper ownership"
-    chef_run("chown -R #{user}:#{group} #{@configuration[:deploy_to]}")    
+    chef_run(fix_ownership_command(user, group, @configuration[:deploy_to]))
     
     Chef::Log.info "deploying branch: #{@configuration[:branch]} rev: #{@configuration[:revision]}"
     Chef::Log.info "updating the cached checkout"
@@ -31,7 +31,7 @@ class CachedDeploy
     chef_run(copy_repository_cache)
     install_gems
     
-    chef_run("chown -R #{user}:#{group} #{@configuration[:deploy_to]}")    
+    chef_run(fix_ownership_command(user, group, @configuration[:deploy_to]))
     
     callback(:before_migrate)
     migrate
@@ -97,12 +97,16 @@ class CachedDeploy
     Chef::Log.info "restarting with previous release"
     restart
   end
+
+  def fix_ownership_command(user, group, path)
+    "find -L #{path} ! -group #{group} -o ! -user #{user} -exec chown #{user}:#{group} \\{\\} \\;"
+  end
   
   def migrate
     if @configuration[:migrate]
       chef_run "ln -nfs #{shared_path}/config/database.yml #{latest_release}/config/database.yml"
       Chef::Log.info "Migrating: cd #{latest_release} && sudo -u #{user} RAILS_ENV=#{@configuration[:environment]} RACK_ENV=#{@configuration[:environment]} MERB_ENV=#{@configuration[:environment]} #{@configuration[:migration_command]}"
-      chef_run("chown -R #{user}:#{group} #{latest_release}")
+      chef_run(fix_ownership_command(user, group, latest_release))
       chef_run("cd #{latest_release} && sudo -u #{user} RAILS_ENV=#{@configuration[:environment]} RACK_ENV=#{@configuration[:environment]} MERB_ENV=#{@configuration[:environment]} #{@configuration[:migration_command]}")
     end
   end
@@ -139,7 +143,7 @@ class CachedDeploy
     Chef::Log.info "symlinking and finishing deploy"
     symlink = false
     begin
-      chef_run [ "chmod -R g+w #{release_to_link}",
+      chef_run [ "find #{release_to_link} ! -perm /g+w -exec chmod g+w \\{\\} \\;",
             "rm -rf #{release_to_link}/log #{release_to_link}/public/system #{release_to_link}/tmp/pids",
             "mkdir -p #{release_to_link}/tmp",
             "ln -nfs #{shared_path}/log #{release_to_link}/log",
@@ -148,13 +152,13 @@ class CachedDeploy
             "ln -nfs #{shared_path}/system #{release_to_link}/public/system",
             "ln -nfs #{shared_path}/pids #{release_to_link}/tmp/pids",
             "ln -nfs #{shared_path}/config/database.yml #{release_to_link}/config/database.yml",
-            "chown -R #{user}:#{group} #{release_to_link}"
+            fix_ownership_command(user, group, release_to_link)
           ].join(" && ")
 
       symlink = true
-      chef_run "rm -f #{current_path} && ln -nfs #{release_to_link} #{current_path} && chown -R #{user}:#{group} #{current_path}"
+      chef_run "rm -f #{current_path} && ln -nfs #{release_to_link} #{current_path} && #{fix_ownership_command(user, group, current_path)}"
     rescue => e
-      chef_run "rm -f #{current_path} && ln -nfs #{previous_release(release_to_link)} #{current_path} && chown -R #{user}:#{group} #{current_path}" if symlink
+      chef_run "rm -f #{current_path} && ln -nfs #{previous_release(release_to_link)} #{current_path} && #{fix_ownership_command(user, group, current_path)}" if symlink
       chef_run "rm -rf #{release_to_link}"
       raise e
     end
