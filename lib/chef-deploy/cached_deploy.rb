@@ -99,7 +99,7 @@ class CachedDeploy
   end
 
   def fix_ownership_command(user, group, path)
-    "find -L #{path} ! -group #{group} -o ! -user #{user} -exec chown #{user}:#{group} \\{\\} \\;"
+    "find -L #{path} \\( ! -group #{group} -o ! -user #{user} \\) -exec chown #{user}:#{group} \\{\\} \\;"
   end
   
   def migrate
