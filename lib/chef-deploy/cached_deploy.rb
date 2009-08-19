@@ -36,6 +36,7 @@ class CachedDeploy
     cleanup
 
     mark_deployed
+    @configuration[:new_resource].updated = true
   end
   
   def restart
@@ -93,6 +94,8 @@ class CachedDeploy
     FileUtils.rm_rf latest_release
     Chef::Log.info "restarting with previous release"
     restart
+
+    @configuration[:new_resource].updated = true
   end
   
   def migrate
