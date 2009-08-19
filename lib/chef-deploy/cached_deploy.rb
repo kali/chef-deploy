@@ -12,14 +12,7 @@ class CachedDeploy
        @configuration[:revision] = source.query_revision(@configuration[:branch]) {|cmd| run_with_result "#{cmd}"}
     end
     
-    if check_current_revision_and_noop_if_same(@configuration[:revision])
-      Chef::Log.info "Revision is already deployed, running migrations if there are any"
-      callback(:before_migrate)
-      migrate
-      callback(:before_symlink)
-      symlink
-      return
-    end
+    return if check_current_revision_and_noop_if_same_and_deployed(@configuration[:revision])
     
     Chef::Log.info "ensuring proper ownership"
     chef_run("chown -R #{user}:#{group} #{@configuration[:deploy_to]}")    
@@ -41,6 +34,8 @@ class CachedDeploy
     restart
     callback(:after_restart)
     cleanup
+
+    mark_deployed
   end
   
   def restart
@@ -50,8 +45,10 @@ class CachedDeploy
     end
   end
   
-  def check_current_revision_and_noop_if_same(newrev)
-    IO.read("#{latest_release}/REVISION").chomp == newrev
+  def check_current_revision_and_noop_if_same_and_deployed(newrev)
+    IO.read("#{latest_release}/REVISION").chomp == newrev &&
+    IO.read("#{shared_path}/DEPLOYED_REVISION").chomp == newrev
+      
   rescue
     false
   end
@@ -276,6 +273,10 @@ class CachedDeploy
     
     def mark
       "(echo #{revision} > #{release_path}/REVISION)"
+    end
+
+    def mark_deployed
+      chef_run("echo #{revision} > #{shared_path}/DEPLOYED_REVISION")
     end
     
     def copy_exclude
