@@ -23,6 +23,7 @@ class CachedDeploy
     Chef::Log.info "copying the cached version to #{release_path}"
     chef_run(copy_repository_cache)
     install_gems
+    prepare_directories
     
     chef_run("chown -R #{user}:#{group} #{@configuration[:deploy_to]}")    
     
@@ -224,6 +225,25 @@ class CachedDeploy
             Chef::Log.info("Error installing gem: #{r.package_name} version: #{r.version}")
             raise e
           end
+        end
+      end
+    end
+
+    def prepare_directories
+      resources = []
+      %w( log system pids config ).each do |shared_subdir|
+        r = Chef::Resource::Directory.new("#{shared_path}/#{shared_subdir}", nil, @configuration[:node])
+        r.owner user
+        r.group group
+        r.mode 0775
+        resources << r
+      end
+      resources.each do |r|
+        begin
+          r.run_action(:create)
+        rescue Chef::Exception::Exec => e
+          Chef::Log.info("Error creating directory #{r.path}")
+          raise e
         end
       end
     end
