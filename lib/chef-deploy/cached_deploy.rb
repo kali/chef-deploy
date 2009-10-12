@@ -12,15 +12,6 @@ class CachedDeploy
        @configuration[:revision] = source.query_revision(@configuration[:branch]) {|cmd| run_with_result "#{cmd}"}
     end
     
-    if check_current_revision_and_noop_if_same(@configuration[:revision])
-      Chef::Log.info "Revision is already deployed, running migrations if there are any"
-      callback(:before_migrate)
-      migrate
-      callback(:before_symlink)
-      symlink
-      return
-    end
-    
     Chef::Log.info "ensuring proper ownership"
     chef_run(fix_ownership_command(user, group, @configuration[:deploy_to]))
     
@@ -46,7 +37,7 @@ class CachedDeploy
   def restart
     unless @configuration[:restart_command].empty?
       Chef::Log.info "restarting app: #{latest_release}"
-      chef_run("cd #{current_path} && sudo -u #{user} RAILS_ENV=#{@configuration[:environment]} RACK_ENV=#{@configuration[:environment]} MERB_ENV=#{@configuration[:environment]} #{@configuration[:restart_command]}")
+      chef_run("cd #{current_path} && sudo -u #{user} INLINEDIR=/tmp RAILS_ENV=#{@configuration[:environment]} RACK_ENV=#{@configuration[:environment]} MERB_ENV=#{@configuration[:environment]} #{@configuration[:restart_command]}")
     end
   end
   
@@ -105,6 +96,7 @@ class CachedDeploy
   def migrate
     if @configuration[:migrate]
       chef_run "ln -nfs #{shared_path}/config/database.yml #{latest_release}/config/database.yml"
+      chef_run "ln -nfs #{shared_path}/log #{latest_release}/log"
       Chef::Log.info "Migrating: cd #{latest_release} && sudo -u #{user} RAILS_ENV=#{@configuration[:environment]} RACK_ENV=#{@configuration[:environment]} MERB_ENV=#{@configuration[:environment]} #{@configuration[:migration_command]}"
       chef_run(fix_ownership_command(user, group, latest_release))
       chef_run("cd #{latest_release} && sudo -u #{user} RAILS_ENV=#{@configuration[:environment]} RACK_ENV=#{@configuration[:environment]} MERB_ENV=#{@configuration[:environment]} #{@configuration[:migration_command]}")
@@ -259,7 +251,8 @@ class CachedDeploy
     end
 
     def update_repository_cache
-      command = "if [ -d #{repository_cache} ]; then " +
+      command = "if [ -d #{repository_cache} ] &&" +
+        "git --git-dir #{repository_cache}/.git/ remote -v | grep -q #{configuration[:repository]}; then " +
         "#{source.sync(revision, repository_cache)}; " +
         "else #{source.checkout(revision, repository_cache)}; fi"
       command
