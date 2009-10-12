@@ -12,6 +12,8 @@ class CachedDeploy
        @configuration[:revision] = source.query_revision(@configuration[:branch]) {|cmd| run_with_result "#{cmd}"}
     end
     
+    return if check_current_revision_and_noop_if_same_and_deployed(@configuration[:revision])
+    
     Chef::Log.info "ensuring proper ownership"
     chef_run(fix_ownership_command(user, group, @configuration[:deploy_to]))
     
@@ -21,6 +23,7 @@ class CachedDeploy
     Chef::Log.info "copying the cached version to #{release_path}"
     chef_run(copy_repository_cache)
     install_gems
+    prepare_directories
     
     chef_run(fix_ownership_command(user, group, @configuration[:deploy_to]))
     
@@ -32,6 +35,9 @@ class CachedDeploy
     restart
     callback(:after_restart)
     cleanup
+
+    mark_deployed
+    @configuration[:new_resource].updated = true
   end
   
   def restart
@@ -41,8 +47,10 @@ class CachedDeploy
     end
   end
   
-  def check_current_revision_and_noop_if_same(newrev)
-    IO.read("#{latest_release}/REVISION").chomp == newrev
+  def check_current_revision_and_noop_if_same_and_deployed(newrev)
+    IO.read("#{latest_release}/REVISION").chomp == newrev &&
+    IO.read("#{shared_path}/DEPLOYED_REVISION").chomp == newrev
+      
   rescue
     false
   end
@@ -87,6 +95,8 @@ class CachedDeploy
     FileUtils.rm_rf latest_release
     Chef::Log.info "restarting with previous release"
     restart
+
+    @configuration[:new_resource].updated = true
   end
 
   def fix_ownership_command(user, group, path)
@@ -223,6 +233,25 @@ class CachedDeploy
         end
       end
     end
+
+    def prepare_directories
+      resources = []
+      %w( log system pids config ).each do |shared_subdir|
+        r = Chef::Resource::Directory.new("#{shared_path}/#{shared_subdir}", nil, @configuration[:node])
+        r.owner user
+        r.group group
+        r.mode 0775
+        resources << r
+      end
+      resources.each do |r|
+        begin
+          r.run_action(:create)
+        rescue Chef::Exception::Exec => e
+          Chef::Log.info("Error creating directory #{r.path}")
+          raise e
+        end
+      end
+    end
     
     def has_gem?(name, version=nil)
       if !$GEM_LIST_DEPLOY
@@ -273,6 +302,10 @@ class CachedDeploy
     
     def mark
       "(echo #{revision} > #{release_path}/REVISION)"
+    end
+
+    def mark_deployed
+      chef_run("echo #{revision} > #{shared_path}/DEPLOYED_REVISION")
     end
     
     def copy_exclude
