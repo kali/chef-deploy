@@ -220,7 +220,6 @@ class CachedDeploy
           next if has_gem?(g[:name], g[:version])
           r = Chef::Resource::GemPackage.new(g[:name], nil, @configuration[:node])
           r.version g[:version]
-          r.source(g.has_key?(:source) ? g[:source] : "http://gems.github.com")
           resources << r
         end
         resources.each do |r|
